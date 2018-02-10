@@ -4,8 +4,13 @@ import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.annotation.TargetApi;
 import android.content.ComponentName;
+import android.content.Context;
+import android.content.DialogInterface;
+import android.content.Intent;
 import android.content.ServiceConnection;
 import android.os.IBinder;
+import android.support.design.widget.TextInputEditText;
+import android.support.v7.app.AlertDialog;
 import android.support.v7.app.AppCompatActivity;
 
 import android.net.Uri;
@@ -13,6 +18,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.text.TextUtils;
+import android.util.Log;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.View.OnClickListener;
@@ -24,8 +30,9 @@ import android.widget.TextView;
 /**
  * A login screen that offers login via username/password.
  */
-public class LoginActivity extends AppCompatActivity {
+public class LoginActivity extends AppCompatActivity implements SocketIoConnection.SimpleListener {
 
+    private static String TAG = "LoginActivity";
     // UI references.
     private EditText mUriView;
     private EditText mUsernameView;
@@ -39,6 +46,7 @@ public class LoginActivity extends AppCompatActivity {
 
         @Override
         public void onServiceConnected(ComponentName componentName, IBinder iBinder) {
+            Log.d(TAG, "SocketIoService is bound");
             mService = ((SocketIoService.LocalBinder) iBinder).getService();
         }
 
@@ -48,21 +56,27 @@ public class LoginActivity extends AppCompatActivity {
         }
     };
 
+    boolean loggedIn = false;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        Log.d(TAG, "onCreate");
+
         setContentView(R.layout.activity_login);
+        if (!bindService(new Intent(this, SocketIoService.class), mConnection,
+                Context.BIND_AUTO_CREATE)) {
+            Log.e(TAG, "Failed to bind SocketIoService");
+        }
 
         // Set up the login form.
-        mUriView = (EditText) findViewById(R.id.uri);
-
-        mUsernameView = (EditText) findViewById(R.id.username);
-
-        mPasswordView = (EditText) findViewById(R.id.password);
+        mUriView = (TextInputEditText) findViewById(R.id.uri);
+        mUsernameView = (TextInputEditText) findViewById(R.id.username);
+        mPasswordView = (TextInputEditText) findViewById(R.id.password);
         mPasswordView.setOnEditorActionListener(new TextView.OnEditorActionListener() {
             @Override
             public boolean onEditorAction(TextView textView, int id, KeyEvent keyEvent) {
-                if (id == R.id.login || id == EditorInfo.IME_NULL) {
+                if (id == getResources().getInteger(R.integer.login_ime_id) || id == EditorInfo.IME_NULL) {
                     attemptLogin();
                     return true;
                 }
@@ -80,6 +94,15 @@ public class LoginActivity extends AppCompatActivity {
 
         mLoginFormView = findViewById(R.id.login_form);
         mProgressView = findViewById(R.id.login_progress);
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        Log.d(TAG, "onDestroy");
+        mService.disconnect();
+        mService = null;
+        unbindService(mConnection);
     }
 
     /**
@@ -137,7 +160,8 @@ public class LoginActivity extends AppCompatActivity {
             // Show a progress spinner, and kick off a background task to
             // perform the user login attempt.
             showProgress(true);
-            mService.connect(uri, username, password);
+            loggedIn = false;
+            mService.connect(uri, username, password, this);
         }
     }
 
@@ -188,6 +212,76 @@ public class LoginActivity extends AppCompatActivity {
             mProgressView.setVisibility(show ? View.VISIBLE : View.GONE);
             mLoginFormView.setVisibility(show ? View.GONE : View.VISIBLE);
         }
+    }
+
+    @Override
+    public void onConnected() {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                Log.d(TAG, "onConnected, loggedIn=" + loggedIn);
+            }
+        });
+    }
+
+    @Override
+    public void onDisconnected() {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                Log.d(TAG, "onDisconnected, loggedIn=" + loggedIn);
+                if (!loggedIn) {
+                    onStateUpdated("Authentication failure", "Try again!");
+                } else {
+                    onStateUpdated("Disconnect", "Connection to server is lost!");
+                }
+                loggedIn = false;
+            }
+        });
+    }
+
+    @Override
+    public void onMessage(final String msg) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                Log.d(TAG, "onMessage, loggedIn=" + loggedIn);
+                if (!loggedIn) {
+                    loggedIn = true;
+                    onStateUpdated("Login successful", msg);
+                } else {
+                    onStateUpdated("New message received", msg);
+                }
+            }
+        });
+    }
+
+    @Override
+    public void onError() {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                Log.d(TAG, "onError, loggedIn=" + loggedIn);
+                onStateUpdated("Connection error", "Please check server URI and your network connectivity");
+            }
+        });
+    }
+
+    private void onStateUpdated(String brief, String description) {
+        mProgressView.setVisibility(View.GONE);
+
+        AlertDialog.Builder alert = new AlertDialog.Builder(this);
+        alert.setTitle(brief);
+        alert.setMessage(description);
+
+        alert.setOnDismissListener(new DialogInterface.OnDismissListener() {
+            @Override
+            public void onDismiss(DialogInterface dialog) {
+                showProgress(false); // restore login form
+            }
+        });
+
+        alert.show();
     }
 }
 

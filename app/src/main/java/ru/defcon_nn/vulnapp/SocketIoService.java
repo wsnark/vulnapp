@@ -20,12 +20,20 @@ public class SocketIoService extends Service {
         return binder;
     }
 
-    public void connect(String uri, String login, String password) {
+    public void connect(String uri, String login, String password,
+                        SocketIoConnection.SimpleListener listener) {
         if (conn != null) {
             conn.disconnect();
         }
-        conn = new SocketIoConnection(uri, login, password);
+        conn = new SocketIoConnection(uri, login, password, listener);
         conn.connect();
+    }
+
+    public void disconnect() {
+        if (conn != null) {
+            conn.disconnect();
+        }
+        conn = null;
     }
 
 }
